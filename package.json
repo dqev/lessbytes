@@ -1,0 +1,71 @@
+{
+    "name": "lessbytes",
+    "version": "1.0.0",
+    "description": "Image compression that converges on visually lossless. SSIM-guided binary search finds the smallest file the human eye can't distinguish from the original. Zero dependencies in the browser; sharp-powered CLI for Node.",
+    "type": "module",
+    "main": "./dist/lessbytes.umd.cjs",
+    "module": "./dist/lessbytes.esm.js",
+    "browser": "./dist/lessbytes.umd.min.js",
+    "unpkg": "./dist/lessbytes.umd.min.js",
+    "jsdelivr": "./dist/lessbytes.umd.min.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/lessbytes.esm.js",
+            "require": "./dist/lessbytes.umd.cjs",
+            "default": "./dist/lessbytes.esm.js"
+        },
+        "./package.json": "./package.json"
+    },
+    "bin": {
+        "lessbytes": "bin/lessbytes.cjs"
+    },
+    "files": [
+        "dist",
+        "src",
+        "bin",
+        "README.md"
+    ],
+    "engines": {
+        "node": ">=16"
+    },
+    "scripts": {
+        "build": "node build.cjs",
+        "prepublishOnly": "node build.cjs"
+    },
+    "keywords": [
+        "image-compression",
+        "image-optimizer",
+        "ssim",
+        "perceptual-quality",
+        "webp",
+        "avif",
+        "jpeg",
+        "png",
+        "cli",
+        "browser",
+        "client-side",
+        "zero-dependency",
+        "sharp",
+        "resize",
+        "lossy"
+    ],
+    "author": {
+        "name": "Dev",
+        "url": "https://devchauhan.in"
+    },
+    "license": "MIT",
+    "homepage": "https://github.com/dqev/lessbytes#readme",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/dqev/lessbytes.git"
+    },
+    "bugs": {
+        "url": "https://github.com/dqev/lessbytes/issues"
+    },
+    "optionalDependencies": {
+        "sharp": "^0.33.0"
+    },
+    "sideEffects": false
+}
