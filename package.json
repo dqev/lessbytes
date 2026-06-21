@@ -1,6 +1,6 @@
 {
     "name": "lessbytes",
-    "version": "1.0.1",
+    "version": "1.1.0",
     "description": "Image compression that converges on visually lossless. SSIM-guided binary search finds the smallest file the human eye can't distinguish from the original. Zero dependencies in the browser; sharp-powered CLI for Node.",
     "type": "module",
     "main": "./dist/lessbytes.umd.cjs",
@@ -65,7 +65,7 @@
         "url": "https://github.com/dqev/lessbytes/issues"
     },
     "optionalDependencies": {
-        "sharp": "^0.33.0"
+        "sharp": "^0.34.0"
     },
     "sideEffects": false
 }

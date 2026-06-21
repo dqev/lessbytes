@@ -2,8 +2,11 @@
 /* ==========================================================================
    lessbytes CLI — compress images from the terminal.
    --------------------------------------------------------------------------
-   Usage examples:
-     lessbytes photo.jpg                         # smart compress in place-safe mode
+   Run with no arguments for a full interactive interface:
+     lessbytes
+
+   Or drive it directly:
+     lessbytes photo.jpg                         # smart, visually-lossless
      lessbytes *.png -o out/                      # batch into a folder
      lessbytes hero.png --format webp --quality 80
      lessbytes big.jpg --max-size 100kb          # hit a target file size
@@ -18,29 +21,82 @@
 
 const fs = require('fs');
 const path = require('path');
+const readline = require('readline');
 
 /* -------------------------- pretty logging -------------------------------- */
 const C = {
   reset: '\x1b[0m', dim: '\x1b[2m', bold: '\x1b[1m',
   green: '\x1b[32m', cyan: '\x1b[36m', yellow: '\x1b[33m', red: '\x1b[31m', gray: '\x1b[90m'
 };
-const supportsColor = process.stdout.isTTY;
+const supportsColor = process.stdout.isTTY && process.env.NO_COLOR === undefined;
 function paint(s, c) { return supportsColor ? c + s + C.reset : s; }
+function truecolor(r, g, b) { return supportsColor ? `\x1b[38;2;${r};${g};${b}m` : ''; }
 function logInfo(s) { console.log(s); }
 function logErr(s) { console.error(paint('✖ ' + s, C.red)); }
+
+/* --------------------------- gradient banner ------------------------------ */
+// 5-row block glyphs for the letters we need (L E S B Y T).
+const GLYPHS = {
+  L: ['█    ', '█    ', '█    ', '█    ', '█████'],
+  E: ['█████', '█    ', '████ ', '█    ', '█████'],
+  S: ['█████', '█    ', '█████', '    █', '█████'],
+  B: ['████ ', '█   █', '████ ', '█   █', '████ '],
+  Y: ['█   █', '█   █', ' ███ ', '  █  ', '  █  '],
+  T: ['█████', '  █  ', '  █  ', '  █  ', '  █  ']
+};
+
+function lerp(a, b, t) { return Math.round(a + (b - a) * t); }
+
+// Three-stop gradient: purple → blue → teal (matches the brand palette).
+function gradientColor(t) {
+  const stops = [[108, 92, 231], [9, 132, 227], [0, 184, 148]];
+  const seg = t * (stops.length - 1);
+  const i = Math.min(Math.floor(seg), stops.length - 2);
+  const f = seg - i;
+  return [
+    lerp(stops[i][0], stops[i + 1][0], f),
+    lerp(stops[i][1], stops[i + 1][1], f),
+    lerp(stops[i][2], stops[i + 1][2], f)
+  ];
+}
+
+function printBanner(pkg) {
+  const word = 'LESSBYTES';
+  const rows = ['', '', '', '', ''];
+  for (const ch of word) {
+    const g = GLYPHS[ch];
+    for (let r = 0; r < 5; r++) rows[r] += g[r] + ' ';
+  }
+  const width = Math.max.apply(null, rows.map(function (r) { return r.length; }));
+  logInfo('');
+  for (const row of rows) {
+    let line = '  ';
+    for (let i = 0; i < row.length; i++) {
+      const ch = row[i];
+      if (ch === ' ') { line += ' '; continue; }
+      if (!supportsColor) { line += ch; continue; }
+      const rgb = gradientColor(i / width);
+      line += truecolor(rgb[0], rgb[1], rgb[2]) + ch + C.reset;
+    }
+    logInfo(line);
+  }
+  logInfo('  ' + paint('Perceptual image compression — converges on visually lossless', C.gray));
+  logInfo('  ' + paint('v' + pkg.version + '  ·  measured, not guessed', C.gray));
+}
 
 /* ---------------------------- help text ----------------------------------- */
 const HELP = `
 ${paint('lessbytes', C.bold)} — smart image compressor
 
 ${paint('USAGE', C.cyan)}
+  lessbytes                       Launch the interactive interface
   lessbytes <files...|dir> [options]
 
 ${paint('OPTIONS', C.cyan)}
   -o, --output <path>     Output file or directory (default: alongside source as *.min.*)
   -f, --format <fmt>      auto | jpeg | webp | png | avif        (default: auto)
   -q, --quality <1-100>   Force a quality instead of auto/SSIM search
-      --max-size <size>   Target max file size, e.g. 100kb, 1.5mb
+      --max-size <size>   Target max file size, e.g. 100kb, 1.5mb (downscales if needed)
       --max-width <px>    Cap output width (keeps aspect ratio)
       --max-height <px>   Cap output height (keeps aspect ratio)
       --ssim <0-1>        Perceptual quality target for auto mode (default: 0.992)
@@ -48,23 +104,31 @@ ${paint('OPTIONS', C.cyan)}
       --suffix <str>      Filename suffix for in-place output (default: .min)
       --keep-larger       Write output even if it is bigger than the source
   -s, --silent            Only print errors
+  -i, --interactive       Force the interactive interface
+      --logo              Print only the logo banner and exit
   -h, --help              Show this help
   -v, --version           Show version
 
 ${paint('EXAMPLES', C.cyan)}
+  lessbytes
   lessbytes photo.jpg
   lessbytes *.png -o build/img --format webp
   lessbytes hero.png --max-size 80kb
   lessbytes ./assets -r --max-width 1920
 `;
 
-/* --------------------------- arg parsing ---------------------------------- */
-function parseArgs(argv) {
-  const o = {
+/* --------------------------- option defaults ------------------------------ */
+function defaultOpts() {
+  return {
     inputs: [], output: null, format: 'auto', quality: null, maxSize: null,
     maxWidth: null, maxHeight: null, ssim: 0.992, recursive: false,
     suffix: '.min', keepLarger: false, silent: false
   };
+}
+
+/* --------------------------- arg parsing ---------------------------------- */
+function parseArgs(argv) {
+  const o = defaultOpts();
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => argv[++i];
@@ -80,6 +144,8 @@ function parseArgs(argv) {
       case '--suffix': o.suffix = next(); break;
       case '--keep-larger': o.keepLarger = true; break;
       case '-s': case '--silent': o.silent = true; break;
+      case '-i': case '--interactive': o.interactive = true; break;
+      case '--logo': case '--banner': o.logo = true; break;
       case '-h': case '--help': o.help = true; break;
       case '-v': case '--version': o.version = true; break;
       default:
@@ -148,6 +214,15 @@ function loadSharp() {
   }
 }
 
+let _avifChecked = false, _avifOk = false;
+function avifSupported(sharp) {
+  if (_avifChecked) return _avifOk;
+  _avifChecked = true;
+  try { _avifOk = !!(sharp.format.heif && sharp.format.heif.output.buffer); }
+  catch (e) { _avifOk = false; }
+  return _avifOk;
+}
+
 /* --------------------- SSIM (luma) for CLI quality gate ------------------- */
 // Mirrors the browser core: mean SSIM on luma, computed on a small sample.
 function ssimLuma(a, b, w, h) {
@@ -189,53 +264,83 @@ async function compressFile(sharp, file, opts) {
   const srcBuf = fs.readFileSync(file);
   const srcSize = srcBuf.length;
   const meta = await sharp(srcBuf).metadata();
+  const hasAlpha = !!meta.hasAlpha;
 
-  // Resolve format.
-  let fmt = opts.format === 'auto' ? autoFormat(meta) : opts.format;
-  if (fmt === 'jpg') fmt = 'jpeg';
+  // Base dimensions after applying any explicit caps (never upscales).
+  let baseW = meta.width || null;
+  let baseH = meta.height || null;
+  if (baseW && opts.maxWidth && baseW > opts.maxWidth) {
+    baseH = baseH ? Math.round(baseH * opts.maxWidth / baseW) : null;
+    baseW = opts.maxWidth;
+  }
+  if (baseH && opts.maxHeight && baseH > opts.maxHeight) {
+    baseW = baseW ? Math.round(baseW * opts.maxHeight / baseH) : null;
+    baseH = opts.maxHeight;
+  }
 
-  // Build a reusable resized pipeline (dimensions only).
-  function pipeline() {
-    let p = sharp(srcBuf, { failOn: 'none' }).rotate(); // honor EXIF orientation
-    if (opts.maxWidth || opts.maxHeight) {
-      p = p.resize({
-        width: opts.maxWidth || null,
-        height: opts.maxHeight || null,
-        fit: 'inside',
-        withoutEnlargement: true
-      });
+  // Returns an encoder bound to a specific output format.
+  function makeEncoder(fmt) {
+    return function encode(quality, scale) {
+      scale = scale || 1;
+      let p = sharp(srcBuf, { failOn: 'none' }).rotate(); // honor EXIF orientation
+      const w = baseW ? Math.max(1, Math.round(baseW * scale)) : null;
+      const h = baseH ? Math.max(1, Math.round(baseH * scale)) : null;
+      if (w || h) p = p.resize({ width: w, height: h, fit: 'inside', withoutEnlargement: true });
+      const q = Math.max(1, Math.min(100, Math.round(quality)));
+      if (fmt === 'png') return p.png({ compressionLevel: 9, palette: true, quality: q }).toBuffer();
+      if (fmt === 'webp') return p.webp({ quality: q, effort: 5 }).toBuffer();
+      if (fmt === 'avif') return p.avif({ quality: q, effort: 4 }).toBuffer();
+      if (hasAlpha) p = p.flatten({ background: opts.background || '#ffffff' });
+      return p.jpeg({ quality: q, mozjpeg: true }).toBuffer();
+    };
+  }
+
+  // Produce a single format's best result under the active mode.
+  async function produceFormat(fmt) {
+    const encode = makeEncoder(fmt);
+    if (opts.quality != null) {
+      const buf = await encode(opts.quality);
+      return { fmt, outBuf: buf, usedQ: opts.quality, usedSSIM: null, scale: 1 };
     }
-    return p;
+    if (opts.maxSize) {
+      const r = await searchSize(encode, opts.maxSize, baseW);
+      return { fmt, outBuf: r.outBuf, usedQ: r.usedQ, usedSSIM: null, scale: r.scale };
+    }
+    const r = await searchSSIM(sharp, srcBuf, encode, opts.ssim);
+    return { fmt, outBuf: r.outBuf, usedQ: r.usedQ, usedSSIM: r.usedSSIM, scale: 1 };
   }
 
-  function encode(quality) {
-    let p = pipeline();
-    if (fmt === 'png') return p.png({ compressionLevel: 9, palette: true }).toBuffer();
-    if (fmt === 'webp') return p.webp({ quality: Math.round(quality), effort: 5 }).toBuffer();
-    if (fmt === 'avif') return p.avif({ quality: Math.round(quality), effort: 4 }).toBuffer();
-    return p.jpeg({ quality: Math.round(quality), mozjpeg: true }).toBuffer();
-  }
-
-  let outBuf, usedQ, usedSSIM = 1;
-
-  if (fmt === 'png') {
-    outBuf = await encode(100);
-  } else if (opts.quality != null) {
-    outBuf = await encode(opts.quality);
-    usedQ = opts.quality;
-  } else if (opts.maxSize) {
-    ({ outBuf, usedQ } = await searchSize(encode, opts.maxSize));
+  // Decide which formats to try.
+  let candidates;
+  if (opts.format === 'auto') {
+    candidates = hasAlpha ? ['webp', 'avif', 'png'] : ['webp', 'avif', 'jpeg'];
   } else {
-    ({ outBuf, usedQ, usedSSIM } = await searchSSIM(sharp, srcBuf, encode, opts.ssim));
+    candidates = [opts.format === 'jpg' ? 'jpeg' : opts.format];
   }
+  candidates = candidates.filter(function (f) { return f !== 'avif' || avifSupported(sharp); });
 
-  // Keep original if compression didn't help.
+  // Encode every candidate; keep the smallest that succeeds.
+  const results = [];
+  for (const fmt of candidates) {
+    try { results.push(await produceFormat(fmt)); }
+    catch (e) { /* skip a format the local encoder can't produce */ }
+  }
+  if (!results.length) throw new Error('no encoder could produce output');
+  results.sort(function (a, b) { return a.outBuf.length - b.outBuf.length; });
+
+  let chosen = results[0];
+  let outBuf = chosen.outBuf;
+  let fmt = chosen.fmt;
+
+  // Keep the original if compression didn't actually help.
   let keptOriginal = false;
   if (!opts.keepLarger && outBuf.length >= srcSize) {
     outBuf = srcBuf;
     keptOriginal = true;
-    fmt = (meta.format === 'jpeg' ? 'jpeg' : meta.format) || fmt;
+    fmt = meta.format || fmt;
   }
+
+  const overBudget = !keptOriginal && opts.maxSize != null && outBuf.length > opts.maxSize;
 
   const outPath = resolveOutPath(file, fmt, opts);
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
@@ -243,14 +348,12 @@ async function compressFile(sharp, file, opts) {
 
   return {
     file, outPath, srcSize, outSize: outBuf.length, format: fmt,
-    quality: usedQ, ssim: usedSSIM, keptOriginal,
+    quality: keptOriginal ? null : chosen.usedQ,
+    ssim: keptOriginal ? null : chosen.usedSSIM,
+    scale: keptOriginal ? 1 : chosen.scale,
+    keptOriginal, overBudget,
     ratio: srcSize ? 1 - outBuf.length / srcSize : 0
   };
-}
-
-function autoFormat(meta) {
-  // Transparent → webp (keeps alpha, beats png on size). Else webp for photos.
-  return 'webp';
 }
 
 // Binary search the lowest quality whose SSIM still passes the gate.
@@ -269,16 +372,28 @@ async function searchSSIM(sharp, srcBuf, encode, target) {
   return best;
 }
 
-// Binary search the highest quality that fits the byte budget.
-async function searchSize(encode, budget) {
-  let lo = 30, hi = 96, best = null;
-  for (let i = 0; i < 8; i++) {
-    const mid = Math.round((lo + hi) / 2);
-    const buf = await encode(mid);
-    if (buf.length <= budget) { best = { outBuf: buf, usedQ: mid }; lo = mid + 1; }
-    else hi = mid - 1;
+// Hit a byte budget: search quality first, then progressively downscale
+// dimensions when even the lowest quality at full size overshoots.
+async function searchSize(encode, budget, baseW) {
+  let best = null;
+  let scale = 1;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    let lo = 20, hi = 96, localBest = null;
+    for (let i = 0; i < 8; i++) {
+      const mid = Math.round((lo + hi) / 2);
+      const buf = await encode(mid, scale);
+      if (buf.length <= budget) { localBest = { outBuf: buf, usedQ: mid, scale }; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    if (localBest) return localBest;
+
+    // Even q20 at this scale is over budget — remember it and shrink.
+    const lowBuf = await encode(20, scale);
+    if (!best || lowBuf.length < best.outBuf.length) best = { outBuf: lowBuf, usedQ: 20, scale };
+    if (lowBuf.length <= budget) return best;
+    scale *= 0.8;
+    if (baseW && Math.round(baseW * scale) < 16) break;
   }
-  if (!best) best = { outBuf: await encode(30), usedQ: 30 };
   return best;
 }
 
@@ -296,21 +411,36 @@ function resolveOutPath(file, fmt, opts) {
   return path.join(path.dirname(file), base + opts.suffix + '.' + ext);
 }
 
-/* -------------------------------- main ------------------------------------ */
-async function main() {
-  let opts;
-  try { opts = parseArgs(process.argv.slice(2)); }
-  catch (e) { logErr(e.message); process.exit(1); }
+/* --------------------------- result printing ------------------------------ */
+function printRow(r) {
+  const name = path.basename(r.file);
+  const pct = r.ratio >= 1 ? '100' : String(Math.min(99, Math.round(r.ratio * 100)));
+  const arrow = paint('→', C.gray);
+  const sizeStr = humanSize(r.srcSize) + ' ' + arrow + ' ' + humanSize(r.outSize);
+  let tag;
+  if (r.keptOriginal) {
+    tag = paint('kept original', C.yellow);
+  } else {
+    const meta = [];
+    meta.push(r.format);
+    if (r.quality != null) meta.push('q' + Math.round(r.quality));
+    if (r.ssim != null && r.ssim < 1) meta.push('ssim ' + r.ssim.toFixed(3));
+    if (r.scale && r.scale < 0.999) meta.push((r.scale * 100).toFixed(0) + '% scale');
+    tag = paint('-' + pct + '%', r.ratio > 0 ? C.green : C.yellow) +
+      paint('  ' + meta.join(' '), C.gray);
+    if (r.overBudget) tag += paint('  ⚠ over target', C.yellow);
+  }
+  logInfo('  ' + paint('✓', C.green) + ' ' + name.padEnd(28).slice(0, 28) + ' ' + sizeStr + '  ' + tag);
+}
 
-  const pkg = require('../package.json');
-  if (opts.version) { console.log(pkg.version); return; }
-  if (opts.help || opts.inputs.length === 0) { console.log(HELP); return; }
-
+/* --------------------------- run compression ------------------------------ */
+async function runCompression(opts, pkg) {
   const sharp = loadSharp();
   const files = expandInputs(opts.inputs, opts.recursive);
   if (files.length === 0) { logErr('No image files found.'); process.exit(1); }
 
   if (!opts.silent) {
+    logInfo('');
     logInfo(paint('lessbytes', C.bold) + paint(' v' + pkg.version, C.gray) + '  ' +
       paint('compressing ' + files.length + ' image' + (files.length > 1 ? 's' : ''), C.cyan));
   }
@@ -335,20 +465,155 @@ async function main() {
       paint('(' + saved + '% smaller)', C.green) +
       (fail ? paint('  ' + fail + ' failed', C.red) : ''));
   }
-  process.exit(fail && !ok ? 1 : 0);
+  return fail && !ok ? 1 : 0;
 }
 
-function printRow(r) {
-  const name = path.basename(r.file);
-  const pct = (r.ratio * 100).toFixed(0);
-  const arrow = paint('→', C.gray);
-  const sizeStr = humanSize(r.srcSize) + ' ' + arrow + ' ' + humanSize(r.outSize);
-  let tag;
-  if (r.keptOriginal) tag = paint('kept original', C.yellow);
-  else tag = paint('-' + pct + '%', r.ratio > 0 ? C.green : C.yellow) +
-    paint('  ' + r.format + (r.quality ? ' q' + r.quality : '') +
-      (r.ssim < 1 ? ' ssim ' + r.ssim.toFixed(3) : ''), C.gray);
-  logInfo('  ' + paint('✓', C.green) + ' ' + name.padEnd(28).slice(0, 28) + ' ' + sizeStr + '  ' + tag);
+/* --------------------------- interactive mode ----------------------------- */
+// A small line reader that buffers incoming lines into a queue so no input is
+// dropped between prompts (rl.question loses buffered lines on piped stdin).
+function makeReader() {
+  const rl = readline.createInterface({ input: process.stdin, terminal: false });
+  const queue = [];
+  const waiters = [];
+  let closed = false;
+  rl.on('line', function (line) {
+    if (waiters.length) waiters.shift()(line);
+    else queue.push(line);
+  });
+  rl.on('close', function () {
+    closed = true;
+    while (waiters.length) waiters.shift()(null);
+  });
+  return {
+    next: function () {
+      if (queue.length) return Promise.resolve(queue.shift());
+      if (closed) return Promise.resolve(null);
+      return new Promise(function (res) { waiters.push(res); });
+    },
+    close: function () { rl.close(); }
+  };
+}
+
+async function ask(reader, prompt) {
+  process.stdout.write(prompt);
+  const line = await reader.next();
+  return line == null ? null : String(line).trim();
+}
+
+async function choose(reader, title, options, defIndex) {
+  logInfo('');
+  logInfo('  ' + paint(title, C.bold));
+  options.forEach(function (o, i) {
+    const def = i === defIndex ? paint('  (default)', C.gray) : '';
+    logInfo('    ' + paint(String(i + 1), C.cyan) + '  ' + o[1] + def);
+  });
+  const ans = await ask(reader, paint('  › ', C.gray));
+  if (!ans) return options[defIndex][0];
+  const n = parseInt(ans, 10);
+  if (n >= 1 && n <= options.length) return options[n - 1][0];
+  return options[defIndex][0];
+}
+
+function stripQuotes(s) { return (s || '').replace(/^['"]|['"]$/g, ''); }
+
+async function runInteractive(pkg) {
+  printBanner(pkg);
+  const reader = makeReader();
+  try {
+    // Input path.
+    let inputPath;
+    while (true) {
+      const ans = await ask(reader, '\n  ' + paint('Image file or folder', C.bold) + paint(' › ', C.gray));
+      if (ans == null) { logErr('No input provided.'); reader.close(); process.exitCode = 1; return; }
+      inputPath = stripQuotes(ans);
+      if (!inputPath) { logErr('Please enter a path.'); continue; }
+      if (fs.existsSync(inputPath)) break;
+      logErr('Not found: ' + inputPath);
+    }
+    const isDir = fs.statSync(inputPath).isDirectory();
+
+    // Format.
+    const format = await choose(reader, 'Output format', [
+      ['auto', 'Auto — compete AVIF / WebP / JPEG, keep the smallest'],
+      ['webp', 'WebP'],
+      ['avif', 'AVIF'],
+      ['jpeg', 'JPEG'],
+      ['png', 'PNG']
+    ], 0);
+
+    // Mode.
+    const mode = await choose(reader, 'Compression mode', [
+      ['smart', 'Smart — visually lossless (SSIM-guided search)'],
+      ['size', 'Target file size'],
+      ['quality', 'Fixed quality']
+    ], 0);
+
+    const opts = defaultOpts();
+    opts.format = format;
+    opts.inputs = [inputPath];
+
+    if (mode === 'size') {
+      while (true) {
+        const raw = await ask(reader, '\n  ' + paint('Target max size', C.bold) + paint(' (e.g. 100kb, 1.5mb) › ', C.gray));
+        try { opts.maxSize = parseSize(raw); if (opts.maxSize) break; } catch (e) { /* retry */ }
+        logErr('Enter a size like 100kb or 1.5mb.');
+      }
+    } else if (mode === 'quality') {
+      while (true) {
+        const raw = await ask(reader, '\n  ' + paint('Quality', C.bold) + paint(' (1-100) › ', C.gray));
+        const q = parseFloat(raw);
+        if (q >= 1 && q <= 100) { opts.quality = q; break; }
+        logErr('Enter a number between 1 and 100.');
+      }
+    } else {
+      const raw = await ask(reader, '\n  ' + paint('SSIM target', C.bold) + paint(' (blank = 0.992) › ', C.gray));
+      const s = parseFloat(raw);
+      if (s > 0 && s <= 1) opts.ssim = s;
+    }
+
+    // Optional max width.
+    const mw = await ask(reader, '\n  ' + paint('Max width in px', C.bold) + paint(' (blank = no limit) › ', C.gray));
+    if (mw && parseInt(mw, 10) > 0) opts.maxWidth = parseInt(mw, 10);
+
+    // Output path.
+    const out = stripQuotes(await ask(reader, '\n  ' + paint('Output path', C.bold) + paint(' (blank = beside source) › ', C.gray)));
+    if (out) opts.output = out;
+
+    // Recursive for directories.
+    if (isDir) {
+      const r = await ask(reader, '\n  ' + paint('Recurse into subfolders?', C.bold) + paint(' (y/N) › ', C.gray));
+      opts.recursive = /^y/i.test(r || '');
+    }
+
+    reader.close();
+    const code = await runCompression(opts, pkg);
+    process.exitCode = code;
+  } catch (e) {
+    reader.close();
+    logErr(e.message);
+    process.exitCode = 1;
+  }
+}
+
+/* -------------------------------- main ------------------------------------ */
+async function main() {
+  const pkg = require('../package.json');
+  let opts;
+  try { opts = parseArgs(process.argv.slice(2)); }
+  catch (e) { logErr(e.message); process.exit(1); }
+
+  if (opts.version) { console.log(pkg.version); return; }
+  if (opts.logo) { printBanner(pkg); console.log(''); return; }
+  if (opts.help) { console.log(HELP); return; }
+
+  if (opts.inputs.length === 0) {
+    if (opts.interactive || process.stdin.isTTY) { await runInteractive(pkg); return; }
+    console.log(HELP);
+    return;
+  }
+
+  const code = await runCompression(opts, pkg);
+  process.exit(code);
 }
 
 main().catch(function (e) { logErr(e.message); process.exit(1); });

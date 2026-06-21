@@ -11,12 +11,13 @@ const path = require('path');
 
 const root = __dirname;
 const core = fs.readFileSync(path.join(root, 'src', 'compressor.core.js'), 'utf8');
+const pkg = require(path.join(root, 'package.json'));
 
 const distDir = path.join(root, 'dist');
 if (!fs.existsSync(distDir)) fs.mkdirSync(distDir, { recursive: true });
 
 const banner = `/*!
- * lessbytes v1.0.0
+ * lessbytes v${pkg.version}
  * Perceptual (SSIM-guided) image compressor for the browser. MIT License.
  * https://github.com/dqev/lessbytes
  */`;

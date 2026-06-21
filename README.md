@@ -13,6 +13,14 @@
   <img alt="types" src="https://img.shields.io/badge/types-included-3178C6?style=flat-square&logo=typescript&logoColor=white">
 </p>
 
+<p>
+  <a href="https://lessbytes.vercel.app"><b>Live demo</b></a>
+  &nbsp;·&nbsp;
+  <a href="#api">API</a>
+  &nbsp;·&nbsp;
+  <a href="#cli">CLI</a>
+</p>
+
 </div>
 
 ---
@@ -48,24 +56,9 @@ JPEG · PNG · WebP · AVIF — with runtime feature detection so AVIF is only u
 
 Five stages. The interesting one is stage four.
 
-```mermaid
-flowchart LR
-    A([Source image]) --> B[Decode &<br/>scan for alpha]
-    B --> C[Stepped<br/>downscale]
-    C --> D{auto mode?}
-    D -->|yes| E[Encode AVIF · WebP · JPEG]
-    D -->|no| F[Encode chosen format]
-    E --> G[SSIM-guided<br/>quality search]
-    F --> G
-    G --> H{Smaller than<br/>original?}
-    H -->|yes| I([Compressed output])
-    H -->|no| J([Return original])
-
-    style A fill:#6C5CE7,color:#fff,stroke:none
-    style I fill:#00B894,color:#fff,stroke:none
-    style J fill:#636E72,color:#fff,stroke:none
-    style G fill:#0984E3,color:#fff,stroke:none
-```
+<div align="center">
+  <img src="https://lessbytes.vercel.app/assets/workflow.png" alt="lessbytes compression pipeline" width="100%">
+</div>
 
 **The search.** Each iteration: encode at candidate quality → decode back to pixel data → compute SSIM against the original. If it passes, push the quality lower; if not, back off. Seven iterations are enough to converge within 1% quality resolution. No heuristics, no lookup tables — just feedback.
 
@@ -104,6 +97,17 @@ Or directly in the browser — no build step, no bundler, nothing to audit:
 ---
 
 ## API
+
+```js
+// ESM / bundlers (Vite, webpack, Rollup, esbuild)
+import { compress, compressBatch, computeSSIM, isFormatSupported } from 'lessbytes';
+
+// CommonJS
+const { compress } = require('lessbytes');
+
+// Browser, no build step — exposes a global `lessbytes`
+// <script src="https://unpkg.com/lessbytes"></script>
+```
 
 ### `compress(input, options?) → Promise<CompressResult>`
 
@@ -166,43 +170,140 @@ Checks whether the browser can **encode** (not just decode) a given mime type. l
 
 The CLI uses [`sharp`](https://sharp.pixelplumbing.com) (libvips) under the hood — the Canvas API isn't available in Node, and sharp is genuinely fast. It's an optional peer dependency: the browser bundle has no knowledge of it.
 
+<div align="center">
+  <img src="https://lessbytes.vercel.app/assets/terminal.png" alt="lessbytes CLI" width="100%">
+</div>
+
+### Installation
+
 ```bash
-npx lessbytes photo.jpg                   # → photo.min.webp, written beside the source
-npx lessbytes ./assets -r -o build/img    # recurse into a directory
-npx lessbytes *.png --format webp -o out/
-npx lessbytes banner.jpg --max-size 100kb
-npx lessbytes huge.jpg --max-width 1920
+# Global — adds the `lessbytes` command to your PATH
+npm install -g lessbytes
+
+# Or run it on demand without installing
+npx lessbytes <files...|dir> [options]
+
+# Or as a project dev-dependency, then call it from npm scripts
+npm install --save-dev lessbytes
 ```
 
-Output for a single file:
+`sharp` is pulled in automatically as an optional dependency. If it failed to install (offline, unsupported platform), the CLI tells you exactly how to add it:
+
+```bash
+npm install -g sharp     # if you installed lessbytes globally
+npm install sharp        # for a local project
+```
+
+### Interactive interface
+
+Run `lessbytes` with no file arguments to launch the full interactive interface. It opens with the logo, then walks you through every option — input, format, mode, dimensions, and output — with sensible defaults you can accept by pressing Enter:
+
+```bash
+lessbytes
+```
+
+<div>
+  <img src="https://lessbytes.vercel.app/assets/terminal.png" alt="lessbytes interactive interface" width="50%">
+</div>
 
 ```
-lessbytes v1.0.0  compressing 1 image
-  ✓ photo.jpg   235.8 KB → 36.9 KB   -84%   webp q93   ssim 0.992
+  Image file or folder › photo.jpg
+
+  Output format
+    1  Auto — compete AVIF / WebP / JPEG, keep the smallest  (default)
+    2  WebP
+    3  AVIF
+    4  JPEG
+    5  PNG
+  › 1
+
+  Compression mode
+    1  Smart — visually lossless (SSIM-guided search)  (default)
+    2  Target file size
+    3  Fixed quality
+  › 1
+
+  Max width in px (blank = no limit) › 1920
+  Output path (blank = beside source) › build/img
+```
+
+The three modes map directly to the flags below:
+
+| Interactive mode | Equivalent flag | What it does |
+|---|---|---|
+| Smart | _(default, none)_ | SSIM-guided search for the smallest visually-lossless file |
+| Target file size | `--max-size` | Searches quality, then downscales until under the byte budget |
+| Fixed quality | `--quality` | Encodes once at the quality you give — no search |
+
+You can also force the interface even in a non-interactive shell with `-i`/`--interactive`.
+
+### Direct usage
+
+```bash
+lessbytes <files...|dir> [options]
+```
+
+`<files...|dir>` accepts any mix of image files, shell globs, and directories. Non-image files are skipped. Directories are scanned one level deep unless you pass `-r`.
+
+```bash
+lessbytes photo.jpg                        # → photo.min.webp, beside the source
+lessbytes *.png -o out/                     # batch a glob into a folder
+lessbytes hero.png --format webp --quality 80
+lessbytes banner.jpg --max-size 100kb       # hit a hard size budget
+lessbytes huge.jpg --max-width 1920         # cap dimensions, keep aspect ratio
+lessbytes ./assets -r -o build/img          # recurse a directory tree
+lessbytes shot.png --format avif --ssim 0.995
+lessbytes icon.png --keep-larger            # always write, even if bigger
+```
+
+### All flags
+
+| Flag | Description | Default |
+|---|---|---|
+| `-o, --output <path>` | Output file or directory. A path with no extension (or a trailing `/`, or an existing dir) is treated as a directory. | `*.min.*` beside source |
+| `-f, --format <fmt>` | `auto` · `jpeg` · `webp` · `png` · `avif` | `auto` |
+| `-q, --quality <1-100>` | Force a fixed quality — skips the SSIM search entirely | — |
+| `--max-size <size>` | Hard size ceiling, e.g. `100kb`, `1.5mb`, `512b`. Searches quality, then downscales if needed. | — |
+| `--max-width <px>` | Cap output width, aspect ratio preserved, never upscales | — |
+| `--max-height <px>` | Cap output height, aspect ratio preserved, never upscales | — |
+| `--ssim <0-1>` | Perceptual target for the quality search | `0.992` |
+| `-r, --recursive` | Recurse into subdirectories | off |
+| `--suffix <str>` | Suffix appended for in-place output | `.min` |
+| `--keep-larger` | Write output even if it ends up bigger than the source | off |
+| `-s, --silent` | Suppress everything except errors | off |
+| `-i, --interactive` | Force the interactive interface | off |
+| `--logo` | Print only the logo banner and exit | — |
+| `-h, --help` | Show help | — |
+| `-v, --version` | Print the version | — |
+
+### How format selection works
+
+- **`auto` (default)** — opaque images compete `WebP`, `AVIF`, and `JPEG`; images with transparency compete `WebP`, `AVIF`, and `PNG`. Each is encoded under the active mode and the **smallest result** wins. AVIF is skipped automatically if your `sharp`/libvips build can't encode it.
+- **Explicit format** — encodes only that format. JPEG flattens transparency onto the `background` color (white by default).
+
+### How `--max-size` works
+
+It's a genuine ceiling, not best-effort. First it binary-searches encoder quality. If even the lowest quality still overshoots the budget, it progressively downscales the dimensions (80% steps) and re-searches until the file fits. If a target is physically impossible (e.g. `--max-size 1b`), it writes the smallest it could produce and flags the row with `⚠ over target`.
+
+### Reading the output
+
+```
+lessbytes v1.1.0  compressing 1 image
+  ✓ photo.jpg   235.8 KB → 36.9 KB   -84%   webp q93 ssim 0.992
 
 Done. 235.8 KB → 36.9 KB  (84.4% smaller)
 ```
 
-<details>
-<summary>All CLI flags</summary>
+Each row shows: source name, `original → output` size, percent saved, the chosen format, the quality the search landed on (`q93`), and the measured `ssim`. A downscaled result appends e.g. `60% scale`; an unbeatable original shows `kept original`.
 
-<br>
+### Exit codes
 
-| Flag | Description | Default |
-|---|---|---|
-| `-o, --output <path>` | Output file or directory | `*.min.*` beside source |
-| `-f, --format <fmt>` | `auto` · `jpeg` · `webp` · `png` · `avif` | `auto` |
-| `-q, --quality <1-100>` | Force a fixed quality — skips the search | — |
-| `--max-size <size>` | Hard size ceiling, e.g. `100kb`, `1.5mb` | — |
-| `--max-width <px>` | Cap output width, aspect ratio preserved | — |
-| `--max-height <px>` | Cap output height, aspect ratio preserved | — |
-| `--ssim <0-1>` | SSIM target for the quality search | `0.992` |
-| `-r, --recursive` | Recurse into subdirectories | off |
-| `--suffix <str>` | Suffix appended for in-place output | `.min` |
-| `--keep-larger` | Write output even if it exceeds source size | off |
-| `-s, --silent` | Suppress output except errors | off |
+| Code | Meaning |
+|---|---|
+| `0` | All images processed (or nothing to do) |
+| `1` | Bad arguments, no images found, `sharp` missing, or every image failed |
 
-</details>
+A run where some images succeed and others fail still exits `0`; failures are printed per-row.
 
 ---
 
@@ -225,6 +326,12 @@ A few decisions that are worth being explicit about:
 **Why 0.992 as the default?** It's not arbitrary. Running the search against a diverse set of photographs and illustrations, 0.992 is consistently below the threshold where any tester flagged visible degradation in A/B comparison. Going lower occasionally produces subtle banding on portraits; going higher costs disproportionately more bytes for imperceptible gain.
 
 **Why return the original when compression would make it larger?** Because the right behavior for a library called by an upload handler is to transparently degrade. A 9 KB PNG does not benefit from WebP encoding — lessbytes hands it back unchanged rather than making you handle that case.
+
+---
+
+## License
+
+[MIT](LICENSE) © [Dev](https://devchauhan.in)
 
 ---
 
