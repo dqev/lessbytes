@@ -1,5 +1,7 @@
 <div align="center">
 
+<a href="https://lessbytes.vercel.app"><img src="https://lessbytes.vercel.app/assets/logo.svg" alt="Lessbytes Logo" width="120" height="120"></a>
+
 # Lessbytes
 
 **Image compression that converges on visually lossless, not just "quality 80".**

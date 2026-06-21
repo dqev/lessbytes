@@ -1,6 +1,6 @@
 {
     "name": "lessbytes",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Image compression that converges on visually lossless. SSIM-guided binary search finds the smallest file the human eye can't distinguish from the original. Zero dependencies in the browser; sharp-powered CLI for Node.",
     "type": "module",
     "main": "./dist/lessbytes.umd.cjs",
@@ -56,7 +56,7 @@
         "url": "https://devchauhan.in"
     },
     "license": "MIT",
-    "homepage": "https://github.com/dqev/lessbytes#readme",
+    "homepage": "https://lessbytes.vercel.app",
     "repository": {
         "type": "git",
         "url": "git+https://github.com/dqev/lessbytes.git"
