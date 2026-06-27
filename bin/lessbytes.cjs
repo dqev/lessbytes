@@ -60,6 +60,17 @@ function gradientColor(t) {
   ];
 }
 
+function gradientText(text, tick) {
+  if (!supportsColor) return text;
+  let res = '';
+  for (let i = 0; i < text.length; i++) {
+    const t = ((i / text.length) + (tick * 0.05)) % 1.0;
+    const rgb = gradientColor(t);
+    res += truecolor(rgb[0], rgb[1], rgb[2]) + text[i];
+  }
+  return res + C.reset;
+}
+
 function printBanner(pkg) {
   const word = 'LESSBYTES';
   const rows = ['', '', '', '', ''];
@@ -94,7 +105,7 @@ ${paint('USAGE', C.cyan)}
 
 ${paint('OPTIONS', C.cyan)}
   -o, --output <path>     Output file or directory (default: alongside source as *.min.*)
-  -f, --format <fmt>      auto | jpeg | webp | png | avif        (default: auto)
+  -f, --format <fmt>      auto | jpeg | webp | png | avif        (default: webp)
   -q, --quality <1-100>   Force a quality instead of auto/SSIM search
       --max-size <size>   Target max file size, e.g. 100kb, 1.5mb (downscales if needed)
       --max-width <px>    Cap output width (keeps aspect ratio)
@@ -120,7 +131,7 @@ ${paint('EXAMPLES', C.cyan)}
 /* --------------------------- option defaults ------------------------------ */
 function defaultOpts() {
   return {
-    inputs: [], output: null, format: 'auto', quality: null, maxSize: null,
+    inputs: [], output: null, format: 'webp', quality: null, maxSize: null,
     maxWidth: null, maxHeight: null, ssim: 0.992, recursive: false,
     suffix: '.min', keepLarger: false, silent: false
   };
@@ -445,14 +456,47 @@ async function runCompression(opts, pkg) {
       paint('compressing ' + files.length + ' image' + (files.length > 1 ? 's' : ''), C.cyan));
   }
 
+  const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   let totalIn = 0, totalOut = 0, ok = 0, fail = 0;
   for (const file of files) {
+    let spinnerInterval = null;
+    if (!opts.silent && process.stdout.isTTY) {
+      let spinnerTick = 0;
+      const statusText = `compressing ${path.basename(file)}...`;
+      
+      const updateSpinner = (tick) => {
+        const frame = SPINNER_FRAMES[tick % SPINNER_FRAMES.length];
+        const rgb = gradientColor((tick % 20) / 20);
+        const coloredSpinner = truecolor(rgb[0], rgb[1], rgb[2]) + frame + C.reset;
+        const coloredStatus = gradientText(statusText, tick);
+        process.stdout.write(`\r  ${coloredSpinner} ${coloredStatus}`);
+      };
+
+      // Print first frame immediately
+      updateSpinner(0);
+
+      spinnerInterval = setInterval(() => {
+        spinnerTick++;
+        updateSpinner(spinnerTick);
+      }, 80);
+    } else if (!opts.silent) {
+      logInfo(`  compressing ${path.basename(file)}...`);
+    }
+
     try {
       const r = await compressFile(sharp, file, opts);
       totalIn += r.srcSize; totalOut += r.outSize; ok++;
+      if (spinnerInterval) {
+        clearInterval(spinnerInterval);
+        process.stdout.write('\r\x1b[K');
+      }
       if (!opts.silent) printRow(r);
     } catch (e) {
       fail++;
+      if (spinnerInterval) {
+        clearInterval(spinnerInterval);
+        process.stdout.write('\r\x1b[K');
+      }
       logErr(path.basename(file) + ' — ' + e.message);
     }
   }
@@ -534,8 +578,8 @@ async function runInteractive(pkg) {
 
     // Format.
     const format = await choose(reader, 'Output format', [
-      ['auto', 'Auto — compete AVIF / WebP / JPEG, keep the smallest'],
       ['webp', 'WebP'],
+      ['auto', 'Auto — compete AVIF / WebP / JPEG, keep the smallest'],
       ['avif', 'AVIF'],
       ['jpeg', 'JPEG'],
       ['png', 'PNG']
@@ -597,6 +641,19 @@ async function runInteractive(pkg) {
 
 /* -------------------------------- main ------------------------------------ */
 async function main() {
+  const isNpx = process.env.npm_lifecycle_event === 'npx' ||
+                process.env.npm_command === 'exec' ||
+                /\b_npx\b/.test(__filename);
+
+  if (isNpx) {
+    logErr('lessbytes must be installed globally to run.');
+    console.error(paint('\nPlease install it globally using:', C.yellow));
+    console.error('  npm install -g lessbytes');
+    console.error(paint('\nAnd then run it directly:', C.yellow));
+    console.error('  lessbytes\n');
+    process.exit(1);
+  }
+
   const pkg = require('../package.json');
   let opts;
   try { opts = parseArgs(process.argv.slice(2)); }

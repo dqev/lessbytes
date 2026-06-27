@@ -115,7 +115,7 @@ const { compress } = require('lessbytes');
 
 ```ts
 const result = await compress(file, {
-  format: 'auto',        // 'auto' | 'jpeg' | 'webp' | 'png' | 'avif'
+  format: 'webp',        // 'webp' | 'auto' | 'jpeg' | 'png' | 'avif' (default)
   targetSSIM: 0.992,     // raise for more fidelity; lower to push smaller
   maxWidth: 1920,        // aspect ratio preserved
   maxHeight: null,
@@ -176,15 +176,14 @@ The CLI uses [`sharp`](https://sharp.pixelplumbing.com) (libvips) under the hood
 
 ### Installation
 
+For performance and to support direct, interactive CLI execution, `lessbytes` must be installed globally. Execution via `npx` is blocked.
+
 ```bash
-# Global — adds the `lessbytes` command to your PATH
+# Install globally — adds the `lessbytes` command to your PATH
 npm install -g lessbytes
 
-# Or run it on demand without installing
-npx lessbytes <files...|dir> [options]
-
-# Or as a project dev-dependency, then call it from npm scripts
-npm install --save-dev lessbytes
+# Run directly
+lessbytes <files...|dir> [options]
 ```
 
 `sharp` is pulled in automatically as an optional dependency. If it failed to install (offline, unsupported platform), the CLI tells you exactly how to add it:
@@ -261,7 +260,7 @@ lessbytes icon.png --keep-larger            # always write, even if bigger
 | Flag | Description | Default |
 |---|---|---|
 | `-o, --output <path>` | Output file or directory. A path with no extension (or a trailing `/`, or an existing dir) is treated as a directory. | `*.min.*` beside source |
-| `-f, --format <fmt>` | `auto` · `jpeg` · `webp` · `png` · `avif` | `auto` |
+| `-f, --format <fmt>` | `auto` · `jpeg` · `webp` · `png` · `avif` | `webp` |
 | `-q, --quality <1-100>` | Force a fixed quality — skips the SSIM search entirely | — |
 | `--max-size <size>` | Hard size ceiling, e.g. `100kb`, `1.5mb`, `512b`. Searches quality, then downscales if needed. | — |
 | `--max-width <px>` | Cap output width, aspect ratio preserved, never upscales | — |
@@ -278,8 +277,9 @@ lessbytes icon.png --keep-larger            # always write, even if bigger
 
 ### How format selection works
 
-- **`auto` (default)** — opaque images compete `WebP`, `AVIF`, and `JPEG`; images with transparency compete `WebP`, `AVIF`, and `PNG`. Each is encoded under the active mode and the **smallest result** wins. AVIF is skipped automatically if your `sharp`/libvips build can't encode it.
-- **Explicit format** — encodes only that format. JPEG flattens transparency onto the `background` color (white by default).
+- **`webp` (default)** — encodes the image into WebP format.
+- **`auto`** — opaque images compete `WebP`, `AVIF`, and `JPEG`; images with transparency compete `WebP`, `AVIF`, and `PNG`. Each is encoded under the active mode and the **smallest result** wins. AVIF is skipped automatically if your `sharp`/libvips build can't encode it.
+- **Explicit format** — encodes only that format (e.g. `jpeg`, `png`, `avif`). JPEG flattens transparency onto the `background` color (white by default).
 
 ### How `--max-size` works
 

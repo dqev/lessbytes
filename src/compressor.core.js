@@ -68,7 +68,7 @@ var DEFAULTS = {
   // 'auto' competes AVIF/WebP/JPEG (and PNG when transparent) and keeps the
   // smallest encode that still passes the perceptual SSIM gate. You can also
   // force a single format: 'jpeg' | 'webp' | 'png' | 'avif'.
-  format: 'auto',
+  format: 'webp',
   // Candidate formats tried in 'auto' mode, best-compression-first.
   autoCandidates: ['avif', 'webp', 'jpeg'],
   // Target perceptual quality (SSIM). 0.992 ≈ visually lossless for photos.
